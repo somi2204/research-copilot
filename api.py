@@ -1,6 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
-from fastapi import UploadFile, File
 
 from agents.qa_agent import qa_agent
 from agents.summary_agent import summary_agent
@@ -11,37 +10,65 @@ from sentence_transformers import SentenceTransformer
 from langchain_ollama import ChatOllama
 
 import fitz
+import os
 
 app = FastAPI()
-# Load PDF
-doc = fitz.open("data/sample.pdf")
 
-full_text = ""
 
-for page in doc:
-    full_text += page.get_text()
+# MODELS
 
-# Split text
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=400,
-    chunk_overlap=150
+embedding_model = SentenceTransformer(
+    'all-MiniLM-L6-v2'
 )
 
-chunks = text_splitter.split_text(full_text)
+llm = ChatOllama(
+    model="llama3.2:1b"
+)
 
-# Embedding model
-model = SentenceTransformer('all-MiniLM-L6-v2')
 
-embeddings = model.encode(chunks)
+# GLOBAL VARIABLES
 
-# Local LLM
-llm = ChatOllama(model="llama3.2:1b")
 
-# Request schema
+chunks = []
+embeddings = []
+
+current_pdf_path = "data/current.pdf"
+
+# PROCESS PDF FUNCTION
+
+def process_pdf(current_pdf_path):
+
+    global chunks
+    global embeddings
+
+    doc = fitz.open(current_pdf_path)
+
+    full_text = ""
+
+    for page in doc:
+        full_text += page.get_text()
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=400,
+        chunk_overlap=150
+    )
+
+    chunks = text_splitter.split_text(full_text)
+
+    embeddings = embedding_model.encode(chunks)
+
+    print(f"\nProcessed PDF: {current_pdf_path}")
+    print(f"Total Chunks: {len(chunks)}")
+
+# REQUEST MODEL
+
+
 class QueryRequest(BaseModel):
     query: str
 
-# Root route
+
+# HOME ROUTE
+
 @app.get("/")
 def home():
 
@@ -49,25 +76,39 @@ def home():
         "message": "Research Copilot API Running"
     }
 
+# PDF UPLOAD ROUTE
+
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
 
-    file_path = f"data/{file.filename}"
+    global current_pdf_path
+
+    file_path = "data/current.pdf"
+
+    contents = await file.read()
 
     with open(file_path, "wb") as f:
-        f.write(await file.read())
+        f.write(contents)
+
+    current_pdf_path = "data/current.pdf"
+
+    print(f"\nNEW PDF UPLOADED: {file.filename}")
+
+    process_pdf(current_pdf_path)
 
     return {
-        "message": f"{file.filename} uploaded successfully"
+        "message": "PDF uploaded and processed successfully"
     }
 
-# Main query endpoint
+# QUERY ROUTE
+
 @app.post("/query")
 def query_ai(request: QueryRequest):
 
     query = request.query
 
     # ROUTER
+
     if "summarize" in query.lower():
 
         answer = summary_agent(
@@ -86,16 +127,13 @@ def query_ai(request: QueryRequest):
 
         answer = qa_agent(
             query,
-            model,
+            embedding_model,
             embeddings,
             chunks,
             llm
         )
 
-    cleaned_answer = answer.replace("\n", "\n• ")
-
     return {
         "query": query,
-        "response": cleaned_answer
+        "response": answer
     }
-

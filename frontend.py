@@ -10,30 +10,28 @@ st.title("🤖 Research Copilot")
 st.write("Multi-Agent AI Research Assistant")
 
 uploaded_file = st.file_uploader(
-    "Upload a PDF",
+    "Upload PDF",
     type=["pdf"]
 )
 
 if uploaded_file is not None:
 
-    if st.button("Upload PDF"):
+    if st.button("Upload"):
 
         files = {
-            "file": uploaded_file.getvalue()
+            "file": (
+                uploaded_file.name,
+                uploaded_file.getvalue(),
+                "application/pdf"
+            )
         }
 
         response = requests.post(
             "http://127.0.0.1:8000/upload",
-            files={
-                "file": (
-                    uploaded_file.name,
-                    uploaded_file,
-                    "application/pdf"
-                )
-            }
+            files=files
         )
 
-        st.success("PDF uploaded successfully!")
+        st.success(response.json()["message"])
 
 # User input
 query = st.text_input(
